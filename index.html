@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Value Service - Aluguéis</title><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#173f5f">
+<style>
+:root{--b:#173f5f;--bg:#f5f7fa;--ok:#17803d;--bad:#b42318;--warn:#a15c00;--muted:#667085}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:#17202a}
+header{background:var(--b);color:#fff;padding:18px 16px;font-size:20px;font-weight:700}
+main{max-width:900px;margin:auto;padding:16px}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.card,.panel,.monthbar{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 8px #00000012}.n{font-size:24px;font-weight:700;margin-top:6px}
+small{color:var(--muted)}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+button{border:0;border-radius:10px;padding:11px 14px;background:var(--b);color:#fff;font-weight:700;cursor:pointer}
+button.alt{background:#e8eef3;color:#173f5f}input,select,textarea{width:100%;padding:10px;border:1px solid #d0d5dd;border-radius:8px;margin:4px 0 10px}
+.item{border-top:1px solid #eee;padding:12px 0}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.bad{color:var(--bad);font-weight:700}.ok{color:var(--ok);font-weight:700}.warn{color:var(--warn);font-weight:700}
+dialog{border:0;border-radius:14px;width:min(92vw,520px);padding:18px}dialog::backdrop{background:#0007}.history{margin-top:8px;padding:9px;background:#f7f9fb;border-radius:9px;font-size:13px}
+.monthbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.monthbar strong{text-transform:capitalize;text-align:center;flex:1}.monthbar button{padding:9px 13px}
+@media(min-width:700px){.cards{grid-template-columns:repeat(4,1fr)}}
+</style></head><body>
+<header>Value Service • Controle de Aluguéis</header><main>
+<div class="monthbar"><button onclick="mudarMes(-1)">←</button><strong id="mesTitulo"></strong><button onclick="mudarMes(1)">→</button></div>
+<div class="cards">
+<div class="card"><small>A receber</small><div class="n" id="prev">R$ 0,00</div></div>
+<div class="card"><small>Recebido</small><div class="n ok" id="rec">R$ 0,00</div></div>
+<div class="card"><small>Em atraso</small><div class="n bad" id="atr">R$ 0,00</div></div>
+<div class="card"><small>Imóveis</small><div class="n" id="qtd">0</div></div></div>
+<div class="toolbar"><button onclick="novo.showModal()">+ Novo aluguel</button><button class="alt" onclick="irHoje()">Mês atual</button><button class="alt" onclick="exportar()">Exportar dados</button></div>
+<div class="panel"><h3>Imóveis e recebimentos</h3><div id="lista"></div></div></main>
+
+<dialog id="novo"><form method="dialog" onsubmit="salvar(event)"><h3>Novo aluguel</h3>
+<label>Imóvel</label><input id="imovel" required placeholder="Ex.: Casa 01"><label>Inquilino</label><input id="inquilino" required>
+<label>Telefone / WhatsApp</label><input id="fone" inputmode="tel"><label>Valor mensal</label><input id="valor" type="number" step="0.01" required>
+<label>Primeiro vencimento</label><input id="vencimento" type="date" required>
+<div class="toolbar"><button type="submit">Salvar</button><button type="button" class="alt" onclick="novo.close()">Cancelar</button></div></form></dialog>
+
+<dialog id="pagamento"><form method="dialog" onsubmit="confirmarPagamento(event)"><h3>Registrar recebimento</h3>
+<input id="pagId" type="hidden"><input id="pagRef" type="hidden"><label>Competência</label><input id="pagCompetencia" disabled>
+<label>Data do pagamento</label><input id="pagData" type="date" required><label>Valor recebido</label><input id="pagValor" type="number" step="0.01" required>
+<label>Forma de pagamento</label><select id="pagForma"><option>Pix</option><option>Dinheiro</option><option>Transferência</option><option>Cartão</option><option>Outro</option></select>
+<label>Observação</label><textarea id="pagObs" rows="2" placeholder="Opcional"></textarea>
+<div class="toolbar"><button type="submit">Confirmar recebimento</button><button type="button" class="alt" onclick="pagamento.close()">Cancelar</button></div></form></dialog>
+
+<script>
+const brl=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const isoLocal=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const dataBR=s=>{if(!s)return '';let [y,m,d]=s.split('-');return `${d}/${m}/${y}`};
+const nomeMes=(y,m)=>new Date(y,m,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+let dados=JSON.parse(localStorage.getItem('aluguéis')||'[]'), agora=new Date(), refAno=agora.getFullYear(), refMes=agora.getMonth();
+
+(function migrar(){let mudou=false;dados.forEach(x=>{if(!x.vencimento){let d=Math.min(Number(x.dia||1),new Date(agora.getFullYear(),agora.getMonth()+1,0).getDate());x.vencimento=`${agora.getFullYear()}-${String(agora.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;mudou=true}if(!Array.isArray(x.pagamentos))x.pagamentos=[];if(x.pago&&!x.pagamentos.length){x.pagamentos.push({competencia:`${agora.getFullYear()}-${String(agora.getMonth()+1).padStart(2,'0')}`,data:isoLocal(agora),valor:Number(x.valor||0),forma:'Não informado',obs:'Migrado da versão anterior'});mudou=true}delete x.pago});if(mudou)localStorage.setItem('aluguéis',JSON.stringify(dados))})();
+
+function persist(){localStorage.setItem('aluguéis',JSON.stringify(dados));render()}
+function ref(){return `${refAno}-${String(refMes+1).padStart(2,'0')}`}
+function mudarMes(n){refMes+=n;if(refMes<0){refMes=11;refAno--}if(refMes>11){refMes=0;refAno++}render()}
+function irHoje(){let d=new Date();refAno=d.getFullYear();refMes=d.getMonth();render()}
+function vencRef(x){let dia=Number((x.vencimento||'').split('-')[2]||1),u=new Date(refAno,refMes+1,0).getDate();return `${refAno}-${String(refMes+1).padStart(2,'0')}-${String(Math.min(dia,u)).padStart(2,'0')}`}
+function pagamentoRef(x){return (x.pagamentos||[]).find(p=>(p.competencia||p.data?.slice(0,7))===ref())}
+function ativoNoMes(x){return (x.vencimento||'').slice(0,7)<=ref()}
+function salvar(e){e.preventDefault();dados.push({id:Date.now(),imovel:imovel.value,inquilino:inquilino.value,fone:fone.value,valor:+valor.value,vencimento:vencimento.value,pagamentos:[]});persist();novo.close();e.target.reset()}
+function abrirPagamento(id){let x=dados.find(x=>x.id===id);pagId.value=id;pagRef.value=ref();pagCompetencia.value=nomeMes(refAno,refMes);pagData.value=isoLocal(new Date());pagValor.value=x.valor;pagForma.value='Pix';pagObs.value='';pagamento.showModal()}
+function confirmarPagamento(e){e.preventDefault();let x=dados.find(x=>x.id===Number(pagId.value));x.pagamentos.push({competencia:pagRef.value,data:pagData.value,valor:+pagValor.value,forma:pagForma.value,obs:pagObs.value.trim()});persist();pagamento.close()}
+function desfazer(id){let x=dados.find(x=>x.id===id),i=x.pagamentos.findIndex(p=>(p.competencia||p.data?.slice(0,7))===ref());if(i>=0&&confirm('Remover o recebimento deste mês?')){x.pagamentos.splice(i,1);persist()}}
+function cobrar(id){let x=dados.find(x=>x.id===id),n=(x.fone||'').replace(/\D/g,'');if(!n)return alert('Cadastre o WhatsApp do inquilino.');let m=encodeURIComponent(`Olá, ${x.inquilino}. Passando para lembrar do aluguel do imóvel ${x.imovel}, no valor de ${brl(x.valor)}, com vencimento em ${dataBR(vencRef(x))}.`);window.open(`https://wa.me/55${n}?text=${m}`,'_blank')}
+function excluir(id){if(confirm('Excluir este cadastro e todo o histórico?')){dados=dados.filter(x=>x.id!==id);persist()}}
+function render(){
+ mesTitulo.textContent=nomeMes(refAno,refMes);
+ let hoje=isoLocal(new Date()), atual=ref()===isoLocal(new Date()).slice(0,7);
+ let ativos=dados.filter(ativoNoMes);
+ let recebidos=ativos.map(x=>pagamentoRef(x)).filter(Boolean), recTotal=recebidos.reduce((a,p)=>a+Number(p.valor||0),0);
+ let pend=ativos.filter(x=>!pagamentoRef(x)), previsto=pend.reduce((a,x)=>a+Number(x.valor||0),0);
+ let atraso=pend.filter(x=>{let v=vencRef(x);return ref()<isoLocal(new Date()).slice(0,7)||(atual&&v<hoje)}).reduce((a,x)=>a+Number(x.valor||0),0);
+ prev.textContent=brl(previsto);rec.textContent=brl(recTotal);atr.textContent=brl(atraso);qtd.textContent=ativos.length;
+ lista.innerHTML=ativos.length?ativos.map(x=>{let p=pagamentoRef(x),v=vencRef(x),atrasado=!p&&(ref()<isoLocal(new Date()).slice(0,7)||(atual&&v<hoje));return `<div class="item"><div class="row"><div><b>${x.imovel}</b><br><small>${x.inquilino} • vencimento ${dataBR(v)}</small></div><div><b>${brl(x.valor)}</b><br><span class="${p?'ok':atrasado?'bad':'warn'}">${p?'Recebido':atrasado?'Atrasado':'A vencer'}</span></div></div>${p?`<div class="history"><b>Pagamento deste mês</b><br>${dataBR(p.data)} • ${brl(p.valor)} • ${p.forma}${p.obs?' • '+p.obs:''}</div>`:''}<div class="toolbar">${p?`<button onclick="desfazer(${x.id})">Desfazer recebimento</button>`:`<button onclick="abrirPagamento(${x.id})">Registrar recebimento</button>`}<button class="alt" onclick="cobrar(${x.id})">Cobrar no WhatsApp</button><button class="alt" onclick="excluir(${x.id})">Excluir</button></div></div>`}).join(''):'<small>Nenhum aluguel com cobrança neste mês.</small>';
+}
+function exportar(){let b=new Blob([JSON.stringify(dados,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='backup-alugueis.json';a.click()}
+render();if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js'))}
+</script></body></html>
